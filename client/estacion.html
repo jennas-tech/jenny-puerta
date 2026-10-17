@@ -1,0 +1,346 @@
+<!doctype html>
+<!-- Estación wake de Jennas — cliente de mesa para el jarvis-wake (:8096).
+     Origen 17-oct-2026: Tavo pidió un Jarvis «tipo Alexa»: siempre esperando,
+     sin botón, con wake word. La espera = openwakeword local en la PC; esta
+     página es el oído (mic continuo por chunks) + el rostro (sprite estático)
+     + la voz (reproduce el audio que el server :8095 sintetizó).
+     17-oct tarde (Tavo): SIN animación de video — «es muy complejo». Sprite
+     estático a la IZQUIERDA y a la DERECHA la hora y el día, layout horizontal.
+     Los audios de estado («Déjame pensar», rellenos) quedan: fijos del server,
+     0 TTS por turno.
+     Truco keep-alive (patrón de las radios web): audio silencioso con
+     MediaSession «playing» + wakeLock — sin eso Android suspende el mic al
+     apagarse la pantalla. -->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0c0b0a">
+<title>Jennas — estación</title>
+<style>
+  :root { --fg:#d9d2c7; --dim:#6f6a63; --bg:#0c0b0a; --ac:#c96f4a; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+              font-family:system-ui,sans-serif; overflow:hidden; }
+  /* ── LAYOUT HORIZONTAL (Tavo, 17-oct): sprite a la izquierda, hora+día a la derecha ── */
+  body { display:flex; flex-direction:row; align-items:center; justify-content:center;
+         gap:clamp(1.2rem,4vw,2.6rem); }
+  #marco { flex:none; width:min(34vmin,240px); aspect-ratio:1; position:relative; }
+  #marco img { position:absolute; inset:0; width:100%; height:100%;
+               object-fit:cover; border-radius:18px; }
+  #marco.activo { outline:2px solid var(--ac); outline-offset:3px; }
+  #panel { display:flex; flex-direction:column; align-items:flex-start;
+           min-width:min(42vw,460px); }
+  #hora { font-size:clamp(3rem,11vw,6rem); font-weight:200; line-height:1;
+          letter-spacing:.01em; font-variant-numeric:tabular-nums; }
+  #dia  { margin-top:.55rem; font-size:clamp(1.15rem,4vw,2rem); font-weight:300;
+          color:var(--dim); }
+  #frase { margin-top:1.4rem; font-size:clamp(1.3rem,4.2vw,2rem); font-weight:300;
+           color:var(--fg); min-height:1.5em; max-width:min(78vw,560px);
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dot { width:.7rem; height:.7rem; border-radius:50%; display:inline-block;
+         background:#3a362f; margin-right:.5rem; vertical-align:baseline; }
+  .dot.on { background:var(--ac); box-shadow:0 0 8px var(--ac); }
+  #btn { margin-top:1.8rem; padding:.85rem 2rem; font-size:1.05rem; border:1px solid var(--ac);
+         background:transparent; color:var(--ac); border-radius:999px; }
+  #btn.on { background:var(--ac); color:#0c0b0a; font-weight:600; }
+  /* controles arriba, discretos: no compiten con el reloj */
+  #ctl { position:fixed; top:1rem; right:1rem; display:flex; gap:.55rem; }
+  #ctl button { background:none; border:1px solid var(--dim); color:var(--dim);
+                border-radius:12px; padding:.45rem .75rem; font-size:.95rem; }
+  #ctl button.act { color:var(--fg); border-color:var(--fg); }
+  #sub { position:fixed; top:1.25rem; left:1.2rem; color:var(--dim); font-size:.88rem; }
+</style>
+</head>
+<body>
+  <div id="marco">
+    <img id="sprite" src="sprites/idle.png?v=20261004b" alt="Jennas">
+  </div>
+  <div id="panel">
+    <div id="hora">—:—</div>
+    <div id="dia">—</div>
+    <div id="frase"><span class="dot" id="dot"></span><span id="fraseTx">estación apagada</span></div>
+    <button id="btn">Activar estación</button>
+  </div>
+  <div id="ctl">
+    <button id="mute">🔇</button>
+    <button id="replay">🔊</button>
+    <button id="stopP">⏹</button>
+  </div>
+  <div id="sub">wake: <em id="ww">—</em> · score <span id="score">0.00</span></div>
+  <audio id="resp" style="display:none"></audio>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const HOST = location.hostname;
+const JJ_TLS = `${location.protocol}//${HOST}:8095`;   // el server JJ por su puerto TLS
+
+const ETIQUETA = { idle:'en reposo', listening:'te escucho', thinking:'déjame pensar…',
+                   talking:'', working:'trabajando', happy:'', alert:'', error:'algo salió mal' };
+
+/* ── reloj del panel derecho (la hora y el día — Tavo, 17-oct) ── */
+function reloj() {
+  const d = new Date();
+  $('hora').textContent = d.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' });
+  $('dia').textContent = d.toLocaleDateString('es-CL', { weekday:'long', day:'numeric', month:'long' });
+}
+setInterval(reloj, 5000); reloj();
+
+/* ── sprite estático: png por estado, precargados (sin video — Tavo, 17-oct) ── */
+const PNGS = {};
+for (const k in ETIQUETA) { PNGS[k] = new Image(); PNGS[k].src = `sprites/${k}.png?v=20261004b`; }
+function spriteDe(e) { return PNGS[e] ? PNGS[e].src : PNGS.idle.src; }
+
+let ac = null, pend = 0, activo = false, pausadoRep = false;
+let estadoRemoto = 'idle', estadoWake = 'dormido', ultimoMostrado = 0, pageStart = Date.now()/1000;
+
+/* ── audio: el keep-alive (silencio loop para que Android no suspenda el mic) ── */
+function makeSilence() {
+  const ab = new ArrayBuffer(44 + 1600*2), dv = new DataView(ab);
+  const w = (o,s)=>{for(let i=0;i<s.length;i++) dv.setUint8(o+i, s.charCodeAt(i));};
+  w(0,'RIFF'); dv.setUint32(4,36+1600*2,true); w(8,'WAVEfmt ');
+  dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+  dv.setUint32(24,1600,true); dv.setUint32(28,1600,true);
+  dv.setUint16(32,2,true); dv.setUint16(34,16,true); w(36,'data');
+  dv.setUint32(40,1600*2,true);
+  return URL.createObjectURL(new Blob([ab],{type:'audio/wav'}));
+}
+let keepA = null;
+function keepAlive() {
+  try {
+    if (!keepA) {
+      keepA = new Audio(makeSilence());
+      keepA.loop = true; keepA.volume = 0;
+      if ('mediaSession' in navigator)
+        navigator.mediaSession.metadata = new MediaMetadata({title:'Jennas', artist:'estación wake'});
+    }
+    if (keepA.paused) { keepA.play().catch(()=>{}); }
+  } catch(e) {}
+  if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(()=>{});
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && activo) keepAlive(); });
+
+/* ── mic continuo → chunks 16 kHz PCM16 → POST /audio ── */
+function down16(f32, inRate) {
+  const ratio = inRate/16000, n = Math.floor(f32.length/ratio);
+  const out = new Float32Array(n);
+  for (let i=0;i<n;i++) { const p=i*ratio, i0=p|0, fr=p-i0;
+    const a=f32[i0]??0, b=f32[i0+1]??a; out[i]=a+(b-a)*fr; }
+  return out;
+}
+let sp = null, pendBuf = new Float32Array(0);
+async function micLoop() {
+  const stream = await navigator.mediaDevices.getUserMedia(
+    { audio:{ channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
+  ac = new (window.AudioContext||window.webkitAudioContext)();
+  const src = ac.createMediaStreamSource(stream);
+  sp = ac.createScriptProcessor(4096, 1, 1);
+  sp.onaudioprocess = e => {
+    if (!activo || pausadoRep) return;
+    const f32 = down16(e.inputBuffer.getChannelData(0), ac.sampleRate);
+    const acc = new Float32Array(pend + f32.length);
+    pend && acc.set(pendBuf, 0); acc.set(f32, pend);
+    let idx = 0;
+    while (acc.length - idx >= 1280) {          // 1280 muestras = 80 ms @16k
+      const chunk = acc.slice(idx, idx+1280);
+      const pcm = new Int16Array(1280);
+      for (let i=0;i<1280;i++) pcm[i] = Math.max(-32768, Math.min(32767, chunk[i]*32767))|0;
+      fetch('/audio', { method:'POST', body:pcm.buffer,
+        headers:{'Content-Type':'audio/pcm16'} }).catch(()=>{});
+      idx += 1280;
+    }
+    pend = acc.length - idx; pendBuf = acc.slice(idx);
+  };
+  src.connect(sp); sp.connect(ac.destination);  // destination silencioso (no loopback)
+}
+
+/* ── estado + AUDIOS DE ESTADO (los fijos del server, como /tablet) ── */
+/* Los fijos: `pensar.wav` («Déjame pensar.») al entrar al thinking y los
+   `relleno-N.wav` (Tavo, 5-oct) mientras el turno se alarga (rotan cada ~14 s).
+   Sintetizados una vez al arranque del server (marker .fijos-voz): 0 TTS por
+   turno. Se sirven por JJ_TLS (:8095) con ?t= para que Android no cachee.     */
+let audioEstado = null, estadoPrevio = '', relleIdx = 0, relleDesde = 0, thinkingDesde = 0;
+let grabPrev = false, graciaPrev = 0;    // los edges de los bips: despertar y «sigo contigo»
+let beepando = false;
+function pitido() {
+  /* «te tomé, puede hablar» — v4 (17-oct 18:32, Tavo: «ahora no se escucha
+     nada» con el v3). CASCADA con diagnóstico visible — el catch mudo del v3
+     es el defecto del día otra vez (el error del play NUNCA se mostró):
+     1. media element /beep.wav (canal certificado, same-origin, 0.95)
+     2. si el play lo muerde: oscilador actx con PLATEAU y gain 1.0 (el v2
+        era decay exponencial sin plateau: flojo por ENERGÍA integrada)
+     3. y el nombre del error queda EN EL PANEL (con el log de requests del
+        wake, el journal dirá si la señal siquiera viajó a la tablet). */
+  try {
+    if (beepando) return;
+    const a = $('resp');
+    if (!a) return;
+    beepando = true;
+    a.onended = () => { beepando = false; };
+    a.volume = 0.95;
+    a.src = `/beep.wav?t=${Date.now()}`;          // same-origin del wake: SIN JJ_TLS
+    a.play().catch(err => {
+      beepando = false;
+      const n = (err && (err.name || err.message)) || 'audio';
+      $('fraseTx').textContent = `🔊 bip: ${n} — tap en 🔊`;
+      pitidoActx();                              // el fallback suena DE TODAS FORMAS
+    });
+  } catch (e) { beepando = false; pitidoActx(); }
+}
+function pitidoActx() {
+  /* fallback del bip: oscilador con PLATEAU (v2 lo tenía decay → RMS bajo) y
+     gain 1.0 — suena aunque el media element muerda. El AEC evita que vuelva
+     por el mic al STT. */
+  try {
+    gestoAudio();
+    if (!actx || actx.state !== 'running') return;
+    const t0 = actx.currentTime;
+    const bip = (t) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(1.0, t + 0.010);
+      g.gain.setValueAtTime(1.0, t + 0.100);         // PLATEAU 90 ms a pleno
+      g.gain.linearRampToValueAtTime(0.0001, t + 0.120);
+      o.connect(g); g.connect(actx.destination);
+      o.start(t); o.stop(t + 0.125);
+    };
+    bip(t0); bip(t0 + 0.19);       // doble-bip igual que el wav
+  } catch (_) {}
+}
+let actx = null;                       // AudioContext compartido: UN resume() tras el gesto
+                                       // habilita TODOS los audios posteriores (el patrón
+                                       // real de /tablet con los fijos suenando)
+function gestoAudio() {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume().catch(() => {});
+  } catch (_) {}
+}
+function reproducirFijo(nombre) {
+  /* Los fijos van por el MISMO <audio> que reproduce la respuesta — el único
+     audio que ya demostró sonar en el Chrome Android de la tablet (las respuestas
+     suenan). Los new Audio() en frío los muerde (NotAllowedError, medido). */
+  gestoAudio();
+  const a = $('resp');
+  if (fijando === nombre) return;             // sin re-disparar el mismo fijo cada tick
+  fijando = nombre;
+  a.src = `${JJ_TLS}/voz/${nombre}?t=${Date.now()}`;
+  a.volume = 0.7;                              // son fondo, no contenido: más bajos
+  a.play().catch(err => $('fraseTx').textContent = `🔊 ${err.name||'audio'} — tap en 🔊`);
+}
+let fijando = '';
+function cortarFijo() {
+  // corta SOLO los FIJOS (pensar/relleno): las respuestas del turno TAMBIÉN viven
+  // en /voz/ (tabla-*.wav — el JJ las llama "audio = /voz/" + real.name) — con el
+  // matcheo ancho de antes, el corta de cada tick LAS MATABA a ~300 ms y el mic
+  // quedaba trancado (pausadoRep sin onended — Tavo rescatando con 🔊 replay).
+  if (!/\/voz\/(pensar|relleno-\d)\./.test($('resp').src)) return;
+  try { $('resp').pause(); $('resp').currentTime = 0; } catch (_) {}
+}
+let lastResp = '';
+function pintar() {
+  /* la respuesta SONANDO es 'talking' por sí sola: el JJ vuelve a 'listening' (su
+     reposo) apenas el TTS terminó de sintetizar — su 'talking' NO cubre la
+     reproducción del cliente, y con mi mapeo el sprite caería a idle con la voz
+     aún en el parlante. El fijo NO cuenta como talking (no detiene el mic). */
+  const respSonando = pausadoRep && !$('resp').paused && /tabla-/.test($('resp').src);
+  const e = respSonando ? 'talking'
+          : (estadoRemoto && estadoRemoto !== 'idle') ? estadoRemoto
+          : (estadoWake === 'listening' ? 'listening' : 'idle');
+  $('sprite').src = spriteDe(e);                       // png estático por estado
+  $('marco').classList.toggle('activo', e !== 'idle');
+  $('dot').classList.toggle('on', e !== 'idle');
+  $('fraseTx').textContent = (e==='talking' && (lastResp||'')) || ETIQUETA[e] || '';
+  /* audios de estado (mismo behavior que /tablet) */
+  if ((e === 'thinking' || e === 'working') && estadoPrevio !== e) {
+    thinkingDesde = Date.now();
+    fijando = '';                           // reset del guard: CADA entrada a thinking
+                                            // vuelve a disparar el «Déjame pensar»
+    reproducirFijo('pensar.wav');                        // «Déjame pensar.» de Jennas
+  } else if (e === 'working' || (e === 'thinking' && Date.now()-thinkingDesde > 14000)) {
+    if (Date.now() - relleDesde > 14000) {               // turno largo: relleno cada ~14 s
+      reproducirFijo('relleno-' + (relleIdx % 5) + '.wav');
+      relleIdx++; relleDesde = Date.now();
+    }
+  } else if (e === 'listening' || e === 'talking' || e === 'idle') {
+    cortarFijo();                                        // hablo o escucho: el relleno calla
+  }
+  estadoPrevio = e;
+}
+
+async function tick() {
+  try {
+    const wj = await (await fetch('/estado')).json();
+    estadoWake = wj.estado; $('ww').textContent = wj.wakeword;
+    $('score').textContent = (wj.score||0).toFixed(2);
+    if (wj.grabcando && !grabPrev) pitido();          // el bip suena SOLO al ENTRAR a grabar
+    grabPrev = !!wj.grabcando;
+    if ((wj.gracia_t || 0) > graciaPrev) pitido();    // modo «explayándose»: el mismo doble-bip
+    graciaPrev = wj.gracia_t || 0;                    // es la señal «sigo contigo, continúa»
+    if (wj.ultimo && wj.ultimo_t > ultimoMostrado) {
+      if (wj.ultimo_t < pageStart) {            // respuestas ANTERIORES a abrir la página:
+        ultimoMostrado = wj.ultimo_t;            // se marcan leídas, NO se reproduce (el fix
+      } else {                                  // de los «Cuatro, Tavo» al recargar)
+        ultimoMostrado = wj.ultimo_t;
+        lastResp = wj.ultimo.respuesta || '';
+        if (wj.ultimo.audio) {                     // reproducir la respuesta del JJ
+          pausadoRep = true;                        // anti-eco: el mic se muda
+          await fetch('/stop', {method:'POST', body:JSON.stringify({on:true})});
+          const a = $('resp');
+          a.volume = 1;                            // si un fijo corrió antes (0.7): respuesta a plena voz
+          a.src = `${JJ_TLS}${wj.ultimo.audio}`;
+          try {
+            await a.play();                            // sonando: el mic permanece MUTE
+          } catch(err) {                               // el autoplay puede morir: error VISIBLE
+            $('fraseTx').textContent = `audio ✗ ${err.name||err.message} — toca 🔊`;
+            pausadoRep = false;                        // no sonó: el mic vuelve AL TIRO
+            fetch('/stop', {method:'POST', body:'{"on":false}'});
+          }
+          a.onended = () => { pausadoRep = false; fetch('/stop',{method:'POST',body:'{"on":false}'}); };
+        }
+      }
+    }
+    /* El estado del JJ viaja DENTRO del /estado del wake (su vigía lo lee por HTTP
+       local). El fetch DIRECTO de JJ_TLS/state.json estaba MUERTO: la Same-Origin
+       Policy lo bloquea (el :8095 no manda Access-Control-Allow-Origin — medido
+       17-oct) → estadoRemoto quedaba 'idle' eterno y los fijos jamás sonaban acá.
+       El 'listening' del JJ es SU reposo (lo manda la tablet): no se muestra —
+       el reposo de la estación lo dice el wake ('dormido'), no el JJ. */
+    estadoRemoto = (wj.jj && wj.jj !== 'listening') ? wj.jj : 'idle';
+  } catch(e) {}
+  pintar();
+}
+setInterval(tick, 300); tick();
+
+/* ── arranque (con gesto del usuario: el mic y el audio lo exigen) ── */
+$('btn').onclick = async () => {
+  if (activo) { activo = false; $('btn').textContent='Activar estación';
+    $('btn').classList.remove('on'); $('marco').classList.remove('activo'); return; }
+  $('btn').textContent='activando…';
+  try {
+    gestoAudio();                       // el GESTO del click: resume del contexto — sin esto
+                                        // el Chrome muerde CUALQUIER audio no-gesto (probarlo
+                                        // fue el hallazgo del 17-oct: NotAllowedError en vivo)
+    await micLoop(); activo = true; keepAlive();
+    $('btn').textContent='Estación ACTIVA (tap para pausar)'; $('btn').classList.add('on');
+    $('fraseTx').textContent='te escucho, tavo';
+  } catch(e) { $('fraseTx').textContent='mic denegado: ' + e.message; }
+};
+$('mute').onclick = () => {
+  const on = !pausadoRep;
+  pausadoRep = on;
+  fetch('/stop', { method:'POST', body:JSON.stringify({on}) });
+  $('mute').classList.toggle('act', on);
+};
+$('replay').onclick = () => {
+  const a = $('resp');
+  if (!a.src) { $('fraseTx').textContent = 'sin respuesta pendiente'; return; }
+  a.play().catch(e => $('fraseTx').textContent = 'audio ✗ ' + (e.name||e.message));
+};
+$('stopP').onclick = () => { activo = false; $('btn').classList.remove('on');
+  $('marco').classList.remove('activo');
+  $('btn').textContent='Activar estación'; $('fraseTx').textContent='estación apagada'; };
+</script>
+</body>
+</html>
