@@ -1,0 +1,6 @@
+__pycache__/
+.venv/
+runtime/
+wake-features/
+*.wav
+!client/beep.wav
