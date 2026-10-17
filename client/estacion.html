@@ -73,7 +73,7 @@
 "use strict";
 const $ = id => document.getElementById(id);
 const HOST = location.hostname;
-const JJ_TLS = `${location.protocol}//${HOST}:8095`;   // el server JJ por su puerto TLS
+const JJ_TLS = ``;  // UNA CABEZA (17-oct): todo vive en :8096 same-origin — sin JJ_SSL, sin SOP
 
 const ETIQUETA = { idle:'en reposo', listening:'te escucho', thinking:'déjame pensar…',
                    talking:'', working:'trabajando', happy:'', alert:'', error:'algo salió mal' };
@@ -158,7 +158,7 @@ async function micLoop() {
 /* Los fijos: `pensar.wav` («Déjame pensar.») al entrar al thinking y los
    `relleno-N.wav` (Tavo, 5-oct) mientras el turno se alarga (rotan cada ~14 s).
    Sintetizados una vez al arranque del server (marker .fijos-voz): 0 TTS por
-   turno. Se sirven por JJ_TLS (:8095) con ?t= para que Android no cachee.     */
+   turno. Same-origin :8096 — una cabeza, un puerto, sin SOP ni CORS     */
 let audioEstado = null, estadoPrevio = '', relleIdx = 0, relleDesde = 0, thinkingDesde = 0;
 let grabPrev = false, graciaPrev = 0;    // los edges de los bips: despertar y «sigo contigo»
 let beepando = false;
