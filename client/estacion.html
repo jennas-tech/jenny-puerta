@@ -308,7 +308,10 @@ async function tick() {
        17-oct) → estadoRemoto quedaba 'idle' eterno y los fijos jamás sonaban acá.
        El 'listening' del JJ es SU reposo (lo manda la tablet): no se muestra —
        el reposo de la estación lo dice el wake ('dormido'), no el JJ. */
-    estadoRemoto = (wj.jj && wj.jj !== 'listening') ? wj.jj : 'idle';
+    /* la PUERTA (22:55): el bicéfalo llenaba estadoRemoto con el canal del VIGÍA
+       (wj.jj) que la consolidación mató — con una cabeza el campo es `estado` del
+       propio wake. Los fijos de espera dependen de que esto llegue a 'thinking'. */
+    estadoRemoto = (wj.estado === 'talking' || wj.estado === 'thinking') ? wj.estado : 'idle';
   } catch(e) {}
   pintar();
 }

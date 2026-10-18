@@ -39,8 +39,28 @@
    "rol": "jennas",
    "texto": "[playful] Jenny… y si el audio llegó, ya sabís que llegó.",
    "t": "22:50:12"
+  },
+  {
+   "rol": "tavo",
+   "texto": "Jenny, ¿cuál es la frase favorita de mi abuela Yolanda?",
+   "t": "22:53:12"
+  },
+  {
+   "rol": "jennas",
+   "texto": "[happy] La abuela Yolanda tenía una que quedó archivada: \"Que sea lo que se sea\"… no sabís la paz que se necesita para decir eso.",
+   "t": "22:53:23"
+  },
+  {
+   "rol": "tavo",
+   "texto": "Jenny, ¿qué horas son?",
+   "t": "22:58:19"
+  },
+  {
+   "rol": "jennas",
+   "texto": "Casi las once de la noche, tavo… sábado, así que la única urgencia pendiente es decidir si es muy tarde para ver algo o no.",
+   "t": "22:58:25"
   }
  ],
- "actualizado": "22:50:12",
+ "actualizado": "22:58:25",
  "estado": "listening"
 }

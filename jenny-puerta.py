@@ -618,11 +618,17 @@ def _preparar_fijos():
 
 
 def _solo_texto(resp):
-    """Los tags son para la voz: la pantalla y el texto guardado van limpios."""
+    """Los tags ([thoughtful], [amused], [/x]…) son la sintaxis de ELEVENLABS — se
+    archivó el 9-oct. Supertonic y Piper LOS LEEN EN VOZ ALTA («corchete thoughtful
+    corchete») — quitarlos SIEMPRE, con cualquier motor. Encima, el para_voz del
+    cerebro saca lo suyo (negritas, títulos, viñetas, guiones)."""
+    t = resp if isinstance(resp, str) else str(resp)
+    t = re.sub(r"\s*\[/?[a-z_]+\]", "", t)
     try:
-        return jv.para_voz(resp)
+        t = jv.para_voz(t)
     except Exception:
-        return re.sub(r"\[/?[a-z_]+\]", "", str(resp)).strip()
+        pass
+    return (t or "").strip() or str(resp).strip()
 
 
 def _publicar(turno):
