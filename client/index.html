@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jennas</title>
+<style>
+  :root { --bg:#0b0d12; --jennas:#f472b6; --txt:#e2e8f0; --dim:#64748b; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; }
+  body { background:var(--bg); color:var(--txt);
+         font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+         display:flex; flex-direction:column; align-items:center;
+         justify-content:center; overflow:hidden; }
+
+  /* ── el avatar: el protagonista, centrado y grande ── */
+  .escena { flex:1; display:flex; align-items:center; justify-content:center;
+            width:100%; padding:2vh; min-height:0; }
+
+  .marco { position:relative; border-radius:50%; overflow:hidden;
+           width:min(76vh, 60vw); aspect-ratio:1; background:#fff;
+           box-shadow:0 0 0 10px #16181f,
+                      0 0 60px 4px rgba(244,114,182,.22);
+           transition:box-shadow .6s ease, transform .6s ease; }
+  .marco.activa { box-shadow:0 0 0 10px #1f2330,
+                             0 0 95px 10px rgba(244,114,182,.5);
+                  transform:scale(1.012); }
+  .marco img { position:absolute; inset:0; width:100%; height:100%;
+               object-fit:cover; display:block;
+               transition:opacity .4s ease; }
+  .marco video { position:absolute; inset:0; width:100%; height:100%;
+                 object-fit:cover; display:block;
+                 transition:opacity .4s ease; }
+  .marco img.oculto, .marco video.oculto { opacity:0; }
+
+  /* ── abajo: solo el estado, legible de lejos ── */
+  .pie { padding:0 4vw 4.5vh; display:flex; align-items:center; gap:1.1rem;
+         min-height:9vh; max-width:92vw; }
+  .led { width:16px; height:16px; border-radius:50%; background:#22c55e;
+         box-shadow:0 0 16px #22c55e; flex-shrink:0;
+         transition:background .4s ease, box-shadow .4s ease; }
+  .led.activo { background:var(--jennas); box-shadow:0 0 22px var(--jennas);
+                animation:late .9s infinite; }
+  @keyframes late { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .piefrase { font-size:clamp(1.5rem, 3.2vh, 2.8rem); line-height:1.25;
+              letter-spacing:.01em; color:var(--txt);
+              transition:color .4s ease; }
+  .piefrase.dice { color:#fff; }
+</style>
+</head>
+<body>
+  <div class="escena">
+    <div class="marco" id="marco">
+      <img id="sprite" src="sprites/idle.png?v=20261004b" alt="Jennas">
+      <video id="spriteVid" muted loop playsinline preload="auto"></video>
+    </div>
+  </div>
+
+  <div class="pie">
+    <span class="led" id="led"></span>
+    <span class="piefrase" id="frase">en reposo</span>
+  </div>
+
+<script>
+  // El avatar es el protagonista. El texto de abajo es UNA línea de estado,
+  // no un registro de la conversación (pedido de Tavo: "el texto se queda fijo
+  // y no aporta"). Mientras habla, se muestra un jirón de lo que dice.
+  const ETIQUETA = { idle:'en reposo', listening:'te escucho',
+                     thinking:'déjame pensar…', talking:'',
+                     working:'trabajando', happy:'',
+                     alert:'', error:'algo salió mal' };
+  let estado = null, ultimo = '';
+  const img = document.getElementById('sprite');
+  const vid = document.getElementById('spriteVid');
+  const marco = document.getElementById('marco');
+  const led = document.getElementById('led');
+  const frase = document.getElementById('frase');
+
+  // Estados animados como MP4 (color completo, livianos); el resto queda en PNG.
+  const ANIM = { thinking: 'sprites/thinking.mp4?v=20261006a', talking: 'sprites/talking.mp4?v=20261007c',
+                 listening: 'sprites/listening.mp4?v=20261005f' };
+
+  function ponEstado(e) {
+    if (e === estado) return;
+    estado = e;
+    const anim = ANIM[e];
+    if (anim) {
+      img.classList.add('oculto');
+      if (!vid.src.endsWith(anim)) { vid.src = anim; }
+      vid.classList.remove('oculto');
+      vid.play().catch(() => {});
+    } else {
+      vid.classList.add('oculto');
+      try { vid.pause(); } catch (_) {}
+      img.classList.add('oculto');
+      const pre = new Image();
+      pre.onload = () => { img.src = pre.src; img.classList.remove('oculto'); };
+      pre.src = 'sprites/' + e + '.png?v=20261004b';
+    }
+    const act = (e !== 'idle');
+    marco.classList.toggle('activa', act);
+    led.classList.toggle('activo', act);
+    const txt = ETIQUETA[e] !== undefined ? ETIQUETA[e] : e;
+    frase.textContent = txt || ultimo || '';
+    frase.classList.toggle('dice', !!txt);
+  }
+
+  async function tick() {
+    try {
+      const r = await fetch('/state.json?_=' + Date.now());
+      const st = await r.json();
+      if (st.estado) ponEstado(st.estado);
+      // mientras habla, mostramos el arranque de lo que dice (no la lista entera)
+      const turnos = st.turnos || [];
+      const j = turnos.filter(t => t.rol === 'jennas').pop();
+      if (j && j.texto && j.texto !== '…') {
+        ultimo = j.texto.length > 120 ? j.texto.slice(0, 120) + '…' : j.texto;
+        if (estado === 'talking') { frase.textContent = ultimo; frase.classList.add('dice'); }
+      }
+    } catch (e) {}
+    setTimeout(tick, 500);
+  }
+  tick();
+</script>
+</body>
+</html>

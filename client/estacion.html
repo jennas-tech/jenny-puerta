@@ -65,6 +65,7 @@
     <button id="mute">🔇</button>
     <button id="replay">🔊</button>
     <button id="stopP">⏹</button>
+    <button id="sesionNueva">🗒️</button>
   </div>
   <div id="sub">wake: <em id="ww">—</em> · score <span id="score">0.00</span></div>
   <audio id="resp" style="display:none"></audio>
@@ -341,6 +342,26 @@ $('replay').onclick = () => {
 $('stopP').onclick = () => { activo = false; $('btn').classList.remove('on');
   $('marco').classList.remove('activo');
   $('btn').textContent='Activar estación'; $('fraseTx').textContent='estación apagada'; };
+$('sesionNueva').onclick = async () => {
+  const b = $('sesionNueva');
+  b.disabled = true; b.textContent = '⏳';
+  try {
+    const r = await fetch('/sesion-nueva', {method:'POST'});
+    const j = await r.json();
+    if (j.ok) {
+      $('resp').removeAttribute('src');
+      $('fraseTx').textContent = '✨ sesión nueva — la charla anterior quedó en el historial';
+      b.textContent = '✨';
+      setTimeout(() => { b.textContent = '🗒️'; }, 1200);
+    } else {
+      $('fraseTx').textContent = '⚠ no pude: ' + (j.error || 'error');
+      b.textContent = '🗒️';
+    }
+  } catch (e) {
+    $('fraseTx').textContent = 'no llegué al server';
+    b.textContent = '🗒️';
+  } finally { b.disabled = false; }
+};
 </script>
 </body>
 </html>

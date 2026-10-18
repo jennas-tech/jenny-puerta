@@ -1,16 +1,5 @@
 {
- "turnos": [
-  {
-   "rol": "tavo",
-   "texto": "Kenny, dime, ¿cuál es la capital de Francia?",
-   "t": "20:50:48"
-  },
-  {
-   "rol": "jennas",
-   "texto": "[amused] Fácil, tavo: París. La capital de Francia… aunque admito que llegar a las ocho y cincuenta de la noche a preguntarme eso me hace sospechar que estaba probando algo más que mi geografía. De paso lo que toca hoy: solo la recarga de celulares (todo el día) y la llave del jardín sigue sellada con cinta esperando al gasfiter. Nada estancado nuevo ni pendientes abiertos este mes. ¿Venía eso solo, o estás testeando cómo respondo a lo trivial con el modelo nuevo?",
-   "t": "20:50:59"
-  }
- ],
- "actualizado": "20:50:59",
+ "turnos": [],
+ "actualizado": "22:21:50",
  "estado": "listening"
 }

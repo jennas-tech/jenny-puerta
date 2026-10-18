@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Jennas</title>
+<style>
+  /* App de TABLET: sprites + voz, TODO servido acá (la TV no participa).
+     El sprite es el protagonista. Entrada por texto O por el botón 🎤 (dictado del
+     navegador — mismo motor de Google), sin abrir el teclado. La respuesta SUENA acá:
+     el server la sintetiza con Piper y la devuelve como archivo. */
+  :root { --bg:#0b0d12; --jennas:#f472b6; --txt:#e2e8f0; --dim:#64748b; --rojo:#ef4444; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; }
+  body { background:var(--bg); color:var(--txt);
+         font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+         display:flex; flex-direction:column; align-items:center;
+         height:100dvh; overflow:hidden; }
+
+  /* ── cabecera liviana (el avatar grande vive abajo) ── */
+  header { width:100%; display:flex; align-items:center; gap:.6rem;
+           padding:.6rem 1rem 0; flex-shrink:0; }
+  .cab-titulo { font-weight:600; letter-spacing:.02em; }
+  .cab-estado { display:flex; align-items:center; gap:.5rem; margin-left:auto;
+                color:var(--dim); font-size:.92rem; }
+  .led { width:11px; height:11px; border-radius:50%; background:#22c55e;
+         box-shadow:0 0 12px #22c55e; flex-shrink:0;
+         transition:background .35s ease, box-shadow .35s ease; }
+  .led.activo { background:var(--jennas); box-shadow:0 0 16px var(--jennas);
+                animation:late .9s infinite; }
+  @keyframes late { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .icono { background:#12151c; border:1px solid #232834; color:var(--txt);
+           border-radius:50%; width:2.5rem; height:2.5rem; font-size:1.1rem;
+           cursor:pointer; flex-shrink:0; }
+  .icono.mudo { color:var(--dim); }
+  /* El botón de voz se esconde cuando el motor expresivo no está disponible: sin esta
+     regla, cualquier `display` que se agregue a `.icono` en el futuro pisaría el
+     `display:none` que el UA aplica a `[hidden]`. */
+  .icono[hidden] { display:none; }
+
+  /* ── el avatar: protagonista, centrado ── */
+  .escena { flex:1; display:flex; align-items:center; justify-content:center;
+            width:100%; padding:1vh 2vw; min-height:0; }
+  .marco { position:relative; border-radius:50%; overflow:hidden;
+           width:min(58vh, 74vw); aspect-ratio:1; background:#fff;
+           box-shadow:0 0 0 8px #16181f, 0 0 60px 4px rgba(244,114,182,.22);
+           transition:box-shadow .6s ease, transform .6s ease; }
+  .marco.activa { box-shadow:0 0 0 8px #1f2330, 0 0 95px 10px rgba(244,114,182,.5);
+                  transform:scale(1.014); }
+  .marco img { position:absolute; inset:0; width:100%; height:100%;
+               object-fit:cover; display:block; transition:opacity .4s ease; }
+  .marco video { position:absolute; inset:0; width:100%; height:100%;
+                 object-fit:cover; display:block; transition:opacity .4s ease; }
+  .marco img.oculto, .marco video.oculto { opacity:0; }
+
+  /* ── línea de estado (lo que dice / hace) ── */
+  .pie { padding:0 5vw 1vh; display:flex; align-items:center; gap:1rem;
+         min-height:6vh; max-width:94vw; text-align:center; }
+  .piefrase { font-size:clamp(1.15rem, 2.6vh, 2rem); line-height:1.25;
+              color:var(--txt); overflow:hidden;
+              display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .piefrase.dice { color:#fff; }
+
+  /* ── entrada: micrófono (dictado) + texto + enviar ── */
+  form { display:flex; gap:.6rem; width:100%;
+         padding:1vh 3vw calc(1.4vh + env(safe-area-inset-bottom));
+         align-items:center; }
+  #mic { background:var(--jennas); color:#160a12; border:0; border-radius:50%;
+         width:3.4rem; height:3.4rem; font-size:1.4rem; cursor:pointer; flex-shrink:0;
+         transition:background .25s ease, transform .15s ease; }
+  #mic:active { transform:scale(.94); }
+  #mic.grabando { background:var(--rojo); color:#fff; animation:pulso 1s infinite; }
+  @keyframes pulso { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.6)}
+                     50%{box-shadow:0 0 0 12px rgba(239,68,68,0)} }
+  #texto { flex:1; resize:none; background:#12151c; color:var(--txt);
+           border:1px solid #232834; border-radius:1.4rem; padding:.85rem 1.1rem;
+           font-size:1.12rem; font-family:inherit; line-height:1.3;
+           max-height:7rem; min-height:3.4rem; }
+  #texto:focus { outline:none; border-color:var(--jennas);
+                 box-shadow:0 0 0 2px rgba(244,114,182,.25); }
+  #enviar { background:var(--jennas); color:#160a12; border:0; border-radius:1.4rem;
+            padding:.85rem 1.2rem; font-size:1.05rem; font-weight:700;
+            cursor:pointer; flex-shrink:0; min-height:3.4rem; }
+  #enviar:disabled { opacity:.55; }
+
+  /* ── aviso transitorio ── */
+  #aviso { position:fixed; left:50%; bottom:13vh; transform:translateX(-50%) translateY(1rem);
+           background:#1b2b45; color:#e8f0ff; padding:.6rem 1rem; border-radius:1rem;
+           font-size:.95rem; max-width:80vw; opacity:0; pointer-events:none;
+           transition:opacity .3s ease, transform .3s ease; z-index:9; }
+  #aviso.ver { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <header>
+    <span class="cab-titulo">Jennas</span>
+    <div class="cab-estado">
+      <span class="led" id="led"></span>
+      <button class="icono" id="voz" type="button" title="voz de las respuestas">🔊</button>
+      <button class="icono" id="vozSel" type="button" title="cambiar la voz de Jarvis" hidden>🇦🇷</button>
+      <button class="icono" id="conv" type="button" title="modo conversación: respuestas largas y fundamentadas">💬</button>
+      <button class="icono" id="guardar" type="button" title="guardar esta conversación (no se recicla)">⭐</button>
+      <button class="icono" id="sesionNueva" type="button" title="empezar una conversación nueva (la actual queda guardada en el historial)">🗒️</button>
+    </div>
+  </header>
+
+  <div class="escena">
+    <div class="marco" id="marco"><img id="sprite" src="sprites/idle.png?v=20261004b" alt="Jennas"><video id="spriteVid" muted loop playsinline preload="auto"></video></div>
+  </div>
+
+  <div class="pie">
+    <span class="piefrase" id="frase">en reposo</span>
+  </div>
+
+  <form id="form">
+    <button id="mic" type="button" title="dictar (toca de nuevo para cortar)">🎤</button>
+    <textarea id="texto" rows="1" enterkeyhint="send"
+              placeholder="Escribe o toca 🎤 para dictar…" autocomplete="off"></textarea>
+    <button id="enviar" type="submit">Enviar</button>
+  </form>
+
+  <div id="aviso"></div>
+
+<script>
+  // El sprite y el estado vienen del state.json que escribe el server. La conversación
+  // NO se registra: solo presencia + una línea. La voz (Piper) suena ACÁ en la tablet.
+  //
+  // El botón 🎤 usa el dictado del navegador (Web Speech API → motor de Google): la misma
+  // tecnología del micrófono del teclado, pero disparada desde la página, sin abrir el
+  // teclado. OJO: exige CONTEXTO SEGURO (HTTPS) → por eso el server sirve también en :8095
+  // con TLS. En HTTP el navegador rechaza el micrófono (isSecureContext=false).
+  const ETIQUETA = { idle:'en reposo', listening:'te escucho', thinking:'déjame pensar…',
+                     talking:'', working:'trabajando', happy:'', alert:'', error:'algo salió mal' };
+  // Mientras trabaja (tool calls) el texto en pantalla es SIEMPRE "déjame pensar…" (Tavo,
+  // 5-oct-2026): no narra pasos técnicos por herramienta, solo el resumen final.
+  // "Déjame pensar" hablado: si el turno NO produjo audio en este tiempo, Jennas lo dice con
+  // su voz y sigue pensando (ver submit). 2,2 s separa el saludo trivial (~0,7 s) de un turno
+  // con herramientas (~6-10 s) sin que la frase suene en el caso rápido.
+  const GRACIA_PENSAR = 2200;
+  // RELLENO de turnos largos (5-oct-2026): mientras la tarea se cocina, la app dice una
+  // frase de espera propia cada RELLENO_MS, en vez de que el modelo narre el trabajo
+  // intermedio. N_RELLENO debe coincidir con la lista RELLENO de jarvis-tablet.py.
+  const RELLENO_MS = 14000;
+  const N_RELLENO = 5;
+  const $ = id => document.getElementById(id);
+  const img = $('sprite'), vid = $('spriteVid'), marco = $('marco'), led = $('led'),
+        frase = $('frase'), caja = $('texto'), boton = $('enviar'), voz = $('voz'),
+        mic = $('mic'), avisoEl = $('aviso'), conv = $('conv'), guardar = $('guardar'),
+        sesionNueva = $('sesionNueva');
+  let estadoRemoto = null, estadoLocal = null, ultimoTexto = '', conVoz = true, textoStream = '';
+  // Modo conversación (4-oct-2026): respuestas largas y fundamentadas en vez del default de
+  // 1-2 frases. Es POR TURNO y se ve en el botón. Persiste en localStorage para que la tablet
+  // recuerde cómo la dejaste (sobrevive a recargar la página).
+  let conversacion = localStorage.getItem('jennas-conv') === '1';
+  // ── anti-eco (half-duplex) ──
+  // El micrófono de la tablet captura la voz de Jennas saliendo por SU parlante → la
+  // transcribe → la manda como pregunta nueva → Jennas responde → se vuelve a capturar.
+  // Un lazo cerrado ("el STT mordiéndose la cola"). El stack no trae cancelación de eco,
+  // así que la mitigación es DOBLE: (1) no escuchar mientras habla, (2) descartar por
+  // texto lo que sea eco de su propia respuesta. Mismo espíritu que la nota de eco del
+  // bucle de voz (`jennas-voz.py`), que recomienda hablar después de que termine.
+  let hablando = false, dictadoActivo = false, ultimaRespuesta = '';
+
+  function _norm(s) {
+    return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9ñ ]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function esEco(texto) {
+    const a = _norm(texto), b = _norm(ultimaRespuesta);
+    if (!a || !b) return false;
+    if (a.length >= 8 && (b.includes(a) || a.includes(b))) return true;  // cita textual
+    const ta = a.split(' ').filter(w => w.length > 2);
+    const tb = new Set(b.split(' ').filter(w => w.length > 2));
+    if (ta.length >= 3) {                                               // solape de tokens
+      const comunes = ta.filter(w => tb.has(w)).length;
+      if (comunes / ta.length >= 0.75) return true;
+    }
+    return false;
+  }
+
+  // MEZCLA de transcripción a nivel de PALABRAS, comparando la COLA (no todo el acumulado).
+  // En Samsung Internet `ev.results` entrega snapshots que se REFINAN: "cómo" → "Cómo se" →
+  // "Cómo se llama" → … y además cambian de mayúscula. Hay que ver si el snapshot nuevo
+  // continúa la cola de lo acumulado (solape de palabras, sin distinguir mayúsculas) y, si
+  // sí, REEMPLAZAR esa cola — no agregarla. Concatenar duplica ("cómo Cómo Cómo se…").
+  function mergeTrans(acc, t) {
+    t = (t || '').trim();
+    if (!t) return acc;
+    if (!acc) return t;
+    const A = acc.split(' '), T = t.split(' ');
+    const nA = A.map(w => w.toLowerCase()), nT = T.map(w => w.toLowerCase());
+    let k = Math.min(A.length, T.length);      // mayor solape sufijo(acc) == prefijo(t)
+    for (; k >= 1; k--) {
+      let ok = true;
+      for (let i = 0; i < k; i++) if (nA[A.length - k + i] !== nT[i]) { ok = false; break; }
+      if (ok) break;
+    }
+    if (k >= 1) return A.slice(0, A.length - k).concat(T).join(' ').replace(/\s+/g, ' ').trim();
+    return (acc + ' ' + t).replace(/\s+/g, ' ').trim();   // sin solape: es contenido nuevo
+  }
+
+  function aviso(txt) {
+    avisoEl.textContent = txt; avisoEl.classList.add('ver');
+    clearTimeout(avisoEl._t);
+    avisoEl._t = setTimeout(() => avisoEl.classList.remove('ver'), 3400);
+  }
+
+  // Estados animados: se sirven como MP4 (color completo, ~12× más liviano que el GIF).
+  // El <video> va encima del <img>; el PNG/GIF queda solo para los estados fijos.
+  const ANIM = { thinking: 'sprites/thinking.mp4?v=20261006a', talking: 'sprites/talking.mp4?v=20261007c',
+                 listening: 'sprites/listening.mp4?v=20261005f' };
+
+  function pintar() {
+    const e = estadoLocal || estadoRemoto || 'idle';
+    const anim = ANIM[e];
+    if (anim) {
+      // mostrar el video, ocultar la imagen
+      img.classList.add('oculto');
+      if (!vid.src.endsWith(anim)) { vid.src = anim; }
+      vid.classList.remove('oculto');
+      vid.play().catch(() => {});
+    } else {
+      // ocultar el video, mostrar la imagen (con preload para no parpadear)
+      vid.classList.add('oculto');
+      try { vid.pause(); } catch (_) {}
+      img.classList.add('oculto');
+      const pre = new Image();
+      pre.onload = () => { img.src = pre.src; img.classList.remove('oculto'); };
+      pre.src = 'sprites/' + e + '.png?v=20261004b';
+    }
+    const act = (e !== 'idle');
+    marco.classList.toggle('activa', act);
+    led.classList.toggle('activo', act);
+    const etiqueta = ETIQUETA[e] !== undefined ? ETIQUETA[e] : e;
+    // texto en vivo del stream tiene prioridad: se ve la oración mientras se genera
+    const txt = textoStream || etiqueta || (e === 'talking' ? ultimoTexto : '') || '';
+    // El estado se muestra SOLO en la frase grande del pie (`#frase`). Antes se duplicaba en
+    // el chip del header (borrado el 7-oct-2026, pedido de Tavo: *"tiene el display de texto
+    // repetido, borra el de arriba"*) — el mismo "te escucho" aparecía dos veces en pantalla.
+    frase.textContent = txt;
+    frase.classList.toggle('dice', !!txt);
+  }
+
+  async function tick() {
+    try {
+      const r = await fetch('/state.json?_=' + Date.now(), {cache:'no-store'});
+      const st = await r.json();
+      const turnos = st.turnos || [];
+      const j = turnos.filter(t => t.rol === 'jennas').pop();
+      if (j && j.texto && j.texto !== '…') {
+        ultimoTexto = j.texto.length > 140 ? j.texto.slice(0, 140) + '…' : j.texto;
+      }
+      if (st.estado) estadoRemoto = st.estado;
+      pintar();
+    } catch (e) {}
+    setTimeout(tick, 500);
+  }
+
+  // auto-alto del textarea
+  const ajustar = () => { caja.style.height = 'auto'; caja.style.height = caja.scrollHeight + 'px'; };
+  caja.addEventListener('input', ajustar);
+
+  // Enter envía; Shift+Enter = salto de línea (teclado físico).
+  caja.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('form').requestSubmit(); }
+  });
+
+  // ── cambio de VOZ (7-oct-2026, pedido de Tavo) ──
+  // "puedes hacer un botón para cambiar voces, con las que estén disponibles. en este caso
+  //  Valeria argentina y este nueva Olivia chilena".
+  // El catálogo lo manda el server (/voces); acá solo se pinta y se elige. El cambio es EN
+  // CALIENTE en el server (no reinicia: el STT vive en VRAM). Si el motor expresivo no está
+  // disponible, /voces viene vacío y el botón se queda escondido (no rompe nada).
+  const vozSel = $('vozSel');
+  let vocesDisp = [], vozActiva = null;
+
+  function pintarVoz() {
+    const v = vocesDisp.find(x => x.clave === vozActiva);
+    if (!v) { vozSel.hidden = true; return; }
+    vozSel.hidden = false;
+    vozSel.textContent = v.emoji || '🗣️';
+    vozSel.title = `voz de Jarvis: ${v.nombre} (${v.acento}) — toca para cambiar`;
+    vozSel.classList.toggle('mudo', !conVoz);
+  }
+
+  async function cargarVoces() {
+    try {
+      const r = await fetch('/voces', { cache: 'no-store' });
+      const d = await r.json();
+      vocesDisp = Array.isArray(d.voces) ? d.voces : [];
+      vozActiva = d.activa || (vocesDisp[0] && vocesDisp[0].clave) || null;
+    } catch (_) {
+      vocesDisp = []; vozActiva = null;
+    }
+    pintarVoz();
+  }
+
+  function abrirMenuVoz() {
+    // Menú simple anclado al botón: en tablet, un popover nativo de <select> es incómodo.
+    const previo = $('menuVoz');
+    if (previo) { previo.remove(); return; }
+    const m = document.createElement('div');
+    m.id = 'menuVoz';
+    const r = vozSel.getBoundingClientRect();
+    m.style.cssText = `position:fixed; top:${Math.round(r.bottom + 6)}px; right:6px; z-index:50;
+      background:#12151c; border:1px solid #232834; border-radius:10px; padding:.35rem;
+      display:flex; flex-direction:column; gap:.25rem; min-width:200px;
+      box-shadow:0 8px 24px rgba(0,0,0,.5);`;
+    vocesDisp.forEach(v => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.style.cssText = `display:flex; align-items:center; gap:.5rem; width:100%; text-align:left;
+        background:${v.clave === vozActiva ? '#1b2130' : 'transparent'}; border:1px solid transparent;
+        border-radius:8px; padding:.5rem .6rem; color:var(--txt); font:inherit; cursor:pointer;`;
+      b.innerHTML = `<span style="font-size:1.1rem">${v.emoji || '🗣️'}</span>
+        <span><strong>${v.nombre}</strong><br>
+        <span style="color:var(--dim); font-size:.8rem">${v.acento}</span></span>
+        ${v.clave === vozActiva ? '<span style="margin-left:auto">✓</span>' : ''}`;
+      b.addEventListener('click', () => elegirVoz(v.clave));
+      m.appendChild(b);
+    });
+    document.body.appendChild(m);
+    // Cerrar al tocar afuera (una sola vez, se limpia solo)
+    const cerrar = ev => {
+      if (!m.contains(ev.target) && ev.target !== vozSel) {
+        m.remove(); document.removeEventListener('click', cerrar, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', cerrar, true), 0);
+  }
+
+  async function elegirVoz(clave) {
+    const m = $('menuVoz'); if (m) m.remove();
+    if (!clave || clave === vozActiva) return;
+    const v = vocesDisp.find(x => x.clave === clave);
+    aviso(`cambiando la voz a ${v ? v.nombre : clave}…`);
+    try {
+      const r = await fetch('/voz', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clave }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) { aviso(`no pude cambiar la voz: ${d.error || r.status}`); return; }
+      vocesDisp = d.voces || vocesDisp; vozActiva = d.activa || clave;
+      pintarVoz();
+      aviso(`voz: ${v ? `${v.nombre} (${v.acento})` : clave}`);
+      // Probar la voz nueva con la frase de espera ya regenerada por el server.
+      try { new Audio('/voz/pensar.wav?t=' + Date.now()).play(); } catch (_) {}
+    } catch (e) {
+      aviso('no pude cambiar la voz (red)');
+    }
+  }
+
+  pintarVoz();
+  vozSel.addEventListener('click', ev => { ev.stopPropagation(); abrirMenuVoz(); });
+  cargarVoces();
+
+  voz.addEventListener('click', () => {
+    conVoz = !conVoz;
+    voz.classList.toggle('mudo', !conVoz);
+    voz.textContent = conVoz ? '🔊' : '🔇';
+    pintarVoz();
+  });
+
+  // ── modo conversación (4-oct-2026) ──
+  // Default: 1-2 frases habladas (el modo de todos los días). Activado: Jennas desarrolla y
+  // fundamenta — para discutir filosofía/narrativa con ella, que es lo que el prompt corto
+  // le prohibía. Se avisa al activarlo porque cambia el ritmo de la charla (y tarda un poco más).
+  function pintarConv() {
+    conv.classList.toggle('mudo', !conversacion);
+    conv.title = conversacion
+      ? 'modo conversación ACTIVO — toca para volver a respuestas cortas'
+      : 'modo conversación: respuestas largas y fundamentadas';
+  }
+  pintarConv();
+  conv.addEventListener('click', () => {
+    conversacion = !conversacion;
+    localStorage.setItem('jennas-conv', conversacion ? '1' : '0');
+    pintarConv();
+    aviso(conversacion ? 'Modo conversación: respuestas largas y fundamentadas'
+                       : 'Modo normal: respuestas cortas');
+  });
+
+  // ── sesión nueva (6-oct-2026, pedido de Tavo) ──
+  // "voy a necesitar un botón para crear una sesión nueva si quiero una sesión fresca".
+  // El server rota el nombre de sesión y limpia `turnos` de state.json; acá se limpia lo que
+  // el cliente arrastra en memoria (si no, la guarda anti-eco seguiría comparando contra la
+  // respuesta vieja y la última frase quedaría pegada en pantalla).
+  // La conversación anterior NO se borra: queda en el historial de Hermes.
+  sesionNueva.addEventListener('click', async () => {
+    const previo = sesionNueva.textContent;
+    sesionNueva.disabled = true;
+    sesionNueva.textContent = '⏳';
+    try {
+      const r = await fetch('/sesion-nueva', { method: 'POST' });
+      const j = await r.json();
+      if (j.ok) {
+        ultimoTexto = ''; ultimaRespuesta = ''; textoStream = '';
+        estadoLocal = null; pintar();
+        aviso('Conversación nueva — la anterior queda en el historial');
+        sesionNueva.textContent = '✨';
+        setTimeout(() => { sesionNueva.textContent = previo; }, 1200);
+      } else {
+        aviso('No pude abrir una sesión nueva: ' + (j.error || 'error'));
+        sesionNueva.textContent = previo;
+      }
+    } catch (e) {
+      aviso('No llegué al server');
+      sesionNueva.textContent = previo;
+    } finally {
+      sesionNueva.disabled = false;
+    }
+  });
+
+  // ── guardar la conversación (4-oct-2026) ──
+  // El reciclaje automático acota por tamaño (una charla de >6 msgs ya se salva sola), pero una
+  // idea buena en 2 turnos caería. Esto la pinea: el prune respeta `pinned` para siempre.
+  guardar.addEventListener('click', async () => {
+    guardar.disabled = true;
+    try {
+      const r = await fetch('/rescatar', { method: 'POST' });
+      const j = await r.json();
+      if (j.ok) {
+        guardar.textContent = '★';                 // relleno = guardada
+        guardar.classList.add('guardada');
+        aviso('Conversación guardada — no se recicla');
+      } else {
+        aviso('No pude guardarla: ' + (j.error || 'error'));
+      }
+    } catch (e) {
+      aviso('No llegué al server');
+    } finally {
+      guardar.disabled = false;
+    }
+  });
+
+  // ── dictado por botón (MediaRecorder → Whisper local) ──
+  // CAMBIO DE INSTRUMENTO (3-oct-2026). Antes usaba la Web Speech API del navegador, y en
+  // Samsung Internet trajo, uno tras otro: texto multiplicado (snapshots que se refinan:
+  // "cómo"→"Cómo se"→…), "switch" al reabrir el micrófono, y cortes que no se podían
+  // controlar. Se abandonó esa vía. Ahora la tablet GRABA audio (MediaRecorder + getUserMedia)
+  // y lo manda a `/transcribir`, donde lo transcribe el MISMO Whisper local del carril de voz.
+  // Una sola transcripción, un solo dueño del corte — el navegador no decide nada.
+  //  · CORTE: el botón 🎤 (toca de nuevo = terminé), o automático tras SILENCIO_MAX ms de
+  //    silencio REAL medido con el VAD propio (Web Audio). En ambos casos lo decide acá.
+  let grabadora = null, streamMic = null, trozos = [], trozosMeta = [],
+      grabando = false, cancelarDictado = false,
+      audioCtx = null, analizador = null, fuenteMic = null, rafVad = 0, t0Vad = 0, vioSonido = false;
+  const SILENCIO_MAX = 3000;   // ms de silencio REAL que cierran el turno (súbelo si quieres más)
+  const VAD_UMBRAL = 0.015;    // energía (RMS) mínima para considerar que estás hablando
+  const REC_TIPOS = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+
+  function _tipoRec() {
+    for (const t of REC_TIPOS) if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+    return '';
+  }
+  function soltarVad() {
+    if (rafVad) { cancelAnimationFrame(rafVad); rafVad = 0; }
+    try { fuenteMic && fuenteMic.disconnect(); } catch (e) {}
+    try { analizador && analizador.disconnect(); } catch (e) {}
+    fuenteMic = null; analizador = null;
+  }
+  function cerrarMic() {
+    soltarVad();
+    try { (streamMic && streamMic.getTracks() || []).forEach(t => t.stop()); } catch (e) {}
+    streamMic = null;
+    // Cerrar el AudioContext (6-oct-2026). Antes se creaba UNA vez y nunca se cerraba: quedaba
+    // vivo el resto de la sesión, con el navegador todavía "usando" el subsistema de audio.
+    // En Android eso mantiene la sesión de audio en modo COMUNICACIÓN (el mismo canal que las
+    // llamadas), que es lo que ata el volumen al canal de llamada en vez del master — el
+    // síntoma que reportó Tavo: *"el volumen ahora lo toma del master, antes lo movía desde el
+    // volumen de llamada"*. Al cerrarlo, el navegador libera la sesión y el audio vuelve al
+    // volumen master. Es también la higiene que pide la doc: un AudioContext se cierra cuando
+    // ya no se usa. `close()` es asíncrono y no hace falta esperarlo; al quedar en null, la
+    // próxima dictada crea uno nuevo (más abajo: `if (!audioCtx) audioCtx = new ...`).
+    try { if (audioCtx && audioCtx.state !== 'closed') audioCtx.close(); } catch (e) {}
+    audioCtx = null;
+  }
+
+  // VAD propio: tras SILENCIO_MAX de silencio REAL (habiendo oído voz antes), corta → transcribe.
+  function vigilarPausa() {
+    if (!analizador) return;
+    const buf = new Uint8Array(analizador.fftSize);
+    const tic = ahora => {
+      if (!grabando) return;
+      analizador.getByteTimeDomainData(buf);
+      let suma = 0;
+      for (let i = 0; i < buf.length; i += 4) { const d = (buf[i] - 128) / 128; suma += d * d; }
+      const rms = Math.sqrt(suma / (buf.length / 4));
+      if (rms > VAD_UMBRAL) { vioSonido = true; t0Vad = ahora; }
+      else if (vioSonido && ahora - t0Vad > SILENCIO_MAX) { pararDictado(false); return; }
+      rafVad = requestAnimationFrame(tic);
+    };
+    rafVad = requestAnimationFrame(tic);
+  }
+
+  async function dictar() {
+    if (grabando) { pararDictado(false); return; }        // tocar de nuevo = terminé
+    if (hablando) { aviso('espera, estoy hablando…'); return; }   // half-duplex: no me escucho
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      aviso('este navegador no deja grabar — abrí la app con https://'); return;
+    }
+    try { streamMic = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { aviso('dale permiso al micrófono (o falta HTTPS)'); return; }
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      fuenteMic = audioCtx.createMediaStreamSource(streamMic);
+      analizador = audioCtx.createAnalyser();
+      analizador.fftSize = 1024;
+      fuenteMic.connect(analizador);
+    } catch (e) { analizador = null; }
+
+    const opciones = {}; const tipo = _tipoRec(); if (tipo) opciones.mimeType = tipo;
+    try { grabadora = new MediaRecorder(streamMic, opciones); }
+    catch (e) { aviso('este navegador no deja grabar'); cerrarMic(); return; }
+
+    trozos = []; trozosMeta = []; cancelarDictado = false;
+    grabadora.ondataavailable = e => {
+      if (e.data && e.data.size) { trozos.push(e.data); trozosMeta.push(e.data.type || opciones.mimeType || 'audio/webm'); }
+    };
+    grabadora.onstop = subirDictado;
+    grabando = true; vioSonido = false; t0Vad = performance.now();
+    mic.classList.add('grabando'); aviso('te escucho… (toca de nuevo para terminar)');
+    try { grabadora.start(); }
+    catch (e) { aviso('no pude empezar a grabar'); grabando = false; mic.classList.remove('grabando'); cerrarMic(); return; }
+    vigilarPausa();
+  }
+
+  function pararDictado(cancelar) {
+    if (!grabando) return;
+    grabando = false; cancelarDictado = !!cancelar;
+    mic.classList.remove('grabando'); soltarVad();
+    try { if (grabadora && grabadora.state !== 'inactive') grabadora.stop(); else subirDictado(); }
+    catch (e) { subirDictado(); }
+  }
+
+  async function subirDictado() {
+    const blob = new Blob(trozos, { type: trozosMeta[0] || 'audio/webm' });
+    cerrarMic();
+    trozos = []; trozosMeta = [];
+    if (cancelarDictado) { cancelarDictado = false; return; }
+    if (!blob.size) { aviso('no te escuché'); return; }
+    aviso('transcribiendo…');
+    try {
+      const r = await fetch('/transcribir', {
+        method: 'POST', headers: { 'Content-Type': blob.type || 'audio/webm' }, body: blob
+      });
+      const d = await r.json();
+      if (d.error) { aviso('no pude transcribir'); return; }
+      const t = (d.texto || '').trim();
+      if (!t) { aviso('no te entendí, prueba de nuevo'); return; }
+      if (esEco(t)) { aviso('era mi propia voz (eco): descartado'); return; }
+      caja.value = mergeTrans(caja.value.trim(), t); ajustar();
+      dictadoActivo = false;
+      $('form').requestSubmit();       // una frase por toque → manda sola
+    } catch (e) { aviso('no llegué al server'); }
+  }
+  mic.addEventListener('click', dictar);
+
+  function reproducir(url) {
+    return new Promise(res => {
+      const a = new Audio(url);
+      hablando = true;                 // ← half-duplex: mientras suena, NO escuchar
+      estadoLocal = 'talking'; pintar();
+      const fin = () => {
+        hablando = false;              // el estado lo resetea el submit al acabar la cola
+        res();
+      };
+      a.onended = fin; a.onerror = fin;
+      a.play().catch(fin);
+    });
+  }
+
+  // La frase de la espera, con la MISMA voz que las respuestas (la sintetiza el server en
+  // `runtime/pensar.wav`). Es un audio fijo: no cuesta TTS en el turno.
+  // El sprite NO se pone en 'talking': sigue en 'thinking' (está pensando, no respondiendo).
+  function decirPensar() {
+    return new Promise(res => {
+      const a = new Audio('/voz/pensar.wav?t=' + Date.now());
+      // half-duplex: mientras suena, no escuchar (si Tavo toca 🎤 justo ahora, se le avisa
+      // en vez de grabar mi propia voz).
+      hablando = true;
+      const fin = () => { hablando = false; res(); };
+      a.onended = fin; a.onerror = fin;
+      a.play().catch(fin);
+    });
+  }
+
+  // RELLENO: rota `/voz/relleno-<i>` para llenar el silencio de un turno largo. Mismo
+  // contrato que `decirPensar` (half-duplex + sprite en thinking). Devuelve una promesa
+  // que resuelve cuando termina de sonar (o al instante si el archivo no está).
+  function decirRelleno(i) {
+    return new Promise(res => {
+      const a = new Audio('/voz/relleno-' + (i % N_RELLENO) + '.wav?t=' + Date.now());
+      hablando = true;
+      const fin = () => { hablando = false; res(); };
+      a.onended = fin; a.onerror = fin;
+      a.play().catch(fin);
+    });
+  }
+
+  $('form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const texto = caja.value.trim();
+    if (!texto) return;
+    caja.value = ''; ajustar(); boton.disabled = true;
+    dictadoActivo = false;             // el turno se está mandando: no queda nada escuchando
+    if (grabando) pararDictado(true);  // half-duplex: no me escucho mientras respondo
+    textoStream = conversacion ? 'pensando a fondo…' : '';
+    estadoLocal = 'thinking'; pintar();
+
+    let hablarAhora = Promise.resolve();   // cadena: reproduce mientras el stream sigue
+    let vioRespuesta = false;
+    const oraciones = [];
+
+    // ── "Déjame pensar" HABLADO (4-oct-2026) ──
+    // El sprite ya lo MUESTRA durante el thinking, pero no lo DECÍA (Tavo: *"no habla en
+    // thinking… tampoco dice déjame pensar"*). Se lo hace decir con su propia voz, pero SOLO
+    // si el turno se demora: si contesta al toque, no tiene sentido que anuncie que va a
+    // pensar y responda encima. Los tiempos reales separan solos los dos casos — saludo
+    // trivial ~0,7 s al primer audio, turno con herramientas ~6-10 s → una gracia de 2,2 s
+    // deja al trivial en silencio y le da voz a la espera larga.
+    // Va DENTRO de `hablarAhora` (la misma cadena del audio): si la respuesta llega mientras
+    // lo está diciendo, el primer audio de la respuesta espera su turno en vez de pisarlo.
+    const avisoPensar = setTimeout(() => {
+      if (conVoz && !vioRespuesta) hablarAhora = hablarAhora.then(decirPensar);
+    }, GRACIA_PENSAR);
+
+    // ── RELLENO de turnos largos (5-oct-2026, pedido de Tavo) ──
+    // "la idea es que Jarvis solo me dé las conclusiones, no el trabajo intermedio... para
+    // llenar el vacío podrían ir frases como 'continúo trabajando', 'ya falta poco'".
+    // El modelo ya no narra el proceso (se lo pide el prompt); el silencio lo llena la app:
+    // cada RELLENO_MS, si Tavo todavía no escuchó NADA, suena una frase de espera rotativa.
+    // Si ya empezó a responder (vioRespuesta) el temporizador se apaga y no interrumpe.
+    let nRelleno = 0;
+    let timerRelleno = null;
+    function programarRelleno() {
+      timerRelleno = setTimeout(() => {
+        if (vioRespuesta || !conVoz) return;
+        hablarAhora = hablarAhora.then(() => decirRelleno(nRelleno++));
+        programarRelleno();               // re-agenda mientras siga sin responder
+      }, RELLENO_MS);
+    }
+    programarRelleno();
+
+    try {
+      const r = await fetch('/preguntar', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ texto, hablar: conVoz, stream: true, conversacion })
+      });
+      if (!r.ok || !r.body) throw new Error('sin stream');
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, {stream: true});
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const linea = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+          if (!linea) continue;
+          let ev; try { ev = JSON.parse(linea); } catch (_) { continue; }
+          if (ev.tipo === 'tool') {
+            // Jennas está TRABAJANDO (leyendo el vault, la API, la web). El sprite pasa a
+            // `thinking` aunque venga después de haber hablado: sin esto se veía "hablando
+            // en silencio" durante la pausa. `tool.fase` = inicio | fin.
+            // Texto: SIEMPRE el genérico "déjame pensar…" — decisión de Tavo (5-oct-2026, cierra
+            // el A/B del 4-oct): no quiere que Jarvis narre los pasos técnicos por herramienta
+            // ("mirando el sistema…", "leyendo…"), solo el resumen final. Es texto de ESPERA en
+            // pantalla; la respuesta hablada sale del stream de texto, no de acá.
+            if (ev.fase === 'inicio') {
+              estadoLocal = 'thinking';
+              textoStream = ETIQUETA.thinking; pintar();
+            }
+            // al 'fin' NO se vuelve a talking: la próxima oración lo hace (evita parpadeo
+            // si el modelo encadena dos herramientas seguidas).
+          } else if (ev.tipo === 'oracion') {
+            vioRespuesta = true;             // ya está respondiendo: no hace falta avisar
+            oraciones.push(ev.texto);
+            ultimaRespuesta = oraciones.join(' ');   // base de la guarda anti-eco
+            ultimoTexto = ev.texto;
+            // Ya está respondiendo: mostrarlo en el sprite AQUÍ, no depender del evento de audio.
+            // Si la voz está apagada no hay audio → sin esto el sprite quedaba en `thinking`
+            // durante toda la respuesta (encontrado probando con 🔊 apagado, 4-oct).
+            estadoLocal = 'talking';
+            // mostrar el texto a medida que llega (jirón de lo que dice)
+            textoStream = ev.texto; pintar();
+          } else if (ev.tipo === 'audio') {
+            const u = ev.url;
+            hablarAhora = hablarAhora.then(() => reproducir(u));  // 1ª suena ya; resto se apila
+          } else if (ev.tipo === 'fin') {
+            ultimaRespuesta = ev.respuesta || ultimaRespuesta;
+            ultimoTexto = ev.respuesta || ultimoTexto;
+          } else if (ev.tipo === 'error') {
+            ultimoTexto = '⚠️ ' + ev.error;
+          }
+        }
+      }
+      await hablarAhora;               // espera que termine de sonar lo encolado
+      textoStream = '';                // ya no hay texto en vivo: vuelve a la etiqueta
+      estadoLocal = null; pintar();
+    } catch (err) {
+      textoStream = ''; ultimoTexto = '⚠️ no llegué al server'; estadoLocal = null; pintar();
+    } finally {
+      clearTimeout(avisoPensar);         // el turno terminó: cancelar el aviso si no sonó
+      clearTimeout(timerRelleno);        // idem el relleno: no debe sonar tras la respuesta
+      // El foco del campo NO se devuelve acá a propósito (6-oct-2026, pedido de Tavo):
+      // "yo quiero abrir el teclado cuando lo necesite, pero que no se abra automático
+      // después que hable Jenny Jarvis". `caja.focus()` en este `finally` corría al cerrar
+      // CADA turno, y en Android/Chrome el foco programático sobre el <textarea> ABRE el
+      // teclado en pantalla → el teclado aparecía solo apenas terminaba de hablar.
+      // Quien necesite escribir toca el campo (gesto propio): recuperar el foco a mano
+      // cuando Tavo ya lo había cerrado es exactamente lo que hay que evitar.
+      boton.disabled = false;
+    }
+  });
+
+  // El polling de estado (tick) tiene que arrancar SIEMPRE: es lo que trae `estadoRemoto`
+  // desde state.json y con eso `pintar()` elige el sprite. Si no se llama, el estado del
+  // servidor no llega nunca: el cliente se queda con el `idle.png` del HTML y pierde el
+  // sprite animado de escucha (bug propio, 6-oct-2026 — al condicionar el foco se borró esta
+  // línea por accidente; el síntoma fue justo "se perdió el sprite en movimiento idle").
+  tick();
+
+  // El foco inicial en el campo es OPCIONAL y va apagado por defecto (6-oct-2026): en la
+  // tablet, enfocar el <textarea> al cargar abre el teclado apenas se entra a la app, y Tavo
+  // quiere abrirlo solo cuando lo pida. `?teclado=1` lo reactiva (útil para probar el dictado
+  // desde el navegador); sin el param, la app arranca sin teclado.
+  if (new URLSearchParams(location.search).get('teclado') === '1') caja.focus();
+</script>
+</body>
+</html>

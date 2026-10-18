@@ -145,19 +145,85 @@ buf: deque[tuple[int, np.ndarray]] = deque(maxlen=BUF_MAX)
 sec_global = {"v": 0}
 last_procesado = {"v": 0}
 NOMBRE_RE = re.compile(
-    r"^\s*(oye\s+|hey\s+|hola\s+|eh\s+|perd[oó]n[aá]*\s+)*(jenny|jena|jeni|jarvis|"
+    r"^\s*(oye\s+|hey\s+|hola\s+|eh\s+|perd[oó]n[aá]*\s+)*(jenny|jeni|jena|keny|keni|kenny|jarvis|"
     r"jervis|gervis|hervis|arvis|ravis)\s*[,;:!.]?\s*", re.IGNORECASE)
+# el comando POR VOZ de rotación (la frase completa — sin falsos positivos en
+# medio de una charla; el STT con/sin tildes se normaliza antes del match.
+# «noda»/«nuea» = las formas reales del STT cuando la voz sale raspada)
+SESION_NUEVA_RE = re.compile(
+    r"^(?:(?:haz(?:me)?|dame|abre|empieza|comienza|vamos\s+a)\s+)?"
+    r"(?:una\s+|otra\s+|la\s+|(?:[a-zñ]{1,4}\s+){1,2})?"
+    r"(?:nueva\s+)?(?:sesion|conversacion)"
+    r"(?:(?:\s+(?:nueva|noda|nuea|\w{1,3})){0,2})?$"
+    r"|^empe[a-z]{0,4}mos\s+de\s+cero$|^desde\s+cero$")
 
 
 def log(*a):
     print(f"[jenny] {time.strftime('%H:%M:%S')}", *a, flush=True)
 
 
+# ── las SESIONES (la herencia real de la tablet app, 6-oct: pedido de Tavo) ──
+def _sesion():
+    """El título de sesión VIGENTE (mutable: `/sesion-nueva` lo rota — otro thread)."""
+    with _SESION_CANDADO:
+        return SESION
+
+
+def _nombre_sesion_libre(base):
+    """Devuelve `base` si no está tomado en state.db; si no `base-2`, `base-3`…
+    El título de sesión es UNIQUE en state.db (idx_sessions_title_unique): reasignar
+    un nombre usado hace fallar el INSERT de Hermes. Si la DB no se puede leer, el
+    candidato sin chequear: el peor caso es el comportamiento de antes."""
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{Path.home()}/.hermes/state.db?mode=ro", uri=True)
+        try:
+            for i in range(1, 21):
+                cand = base if i == 1 else f"{base}-{i}"
+                fila = con.execute("SELECT 1 FROM sessions WHERE title = ? LIMIT 1", (cand,)).fetchone()
+                if not fila:
+                    return cand
+        finally:
+            con.close()
+    except Exception:
+        pass
+    return f"{base}-{int(time.time())}"   # último recurso: siempre único
+
+
+def _sesion_nueva():
+    """Rotación de sesión (el botón 🗒️ de la tablet, ahora en la casa entera):
+    - Rota el título VIGENTE → el próximo turno parte el hilo limpio (el historial
+      de Hermes queda en el título viejo, recuperable — NO se borra nada).
+    - LIMPIA el historial en PANTALLA (turnos=[] en state.json) — la pantalla no
+      puede seguir mostrando la frase de la charla vieja al lado de un sprite en
+      reposo. Solo turnos: el estado lo maneja el turn-cycle."""
+    global SESION
+    vieja = _sesion()
+    with _SESION_CANDADO:
+        # la base AL SEGUNDO: una rotación en el mismo minuto que el arranque
+        # no puede volver a parir el mismo título (22:19 lo delató: 2219 → 2219)
+        nueva = _nombre_sesion_libre("tablet-" + time.strftime("%Y-%m-%d-%H%M%S"))
+        SESION = nueva
+    with _EST:
+        try:
+            st = json.loads(jv.STATE.read_text()) if jv.STATE.exists() else {}
+        except Exception:
+            st = {}
+        st["turnos"] = []
+        st["actualizado"] = time.strftime("%H:%M:%S")
+        jv.STATE.write_text(json.dumps(st, ensure_ascii=False, indent=1))
+    with lock:                       # la respuesta de la charla vieja no puede
+        estado["ultimo"] = None      # re-sonar con el sprite ya limpito —
+        estado["score"] = 0.0        # ni el replay 🔊 tiene de qué volver
+    log(f"SESIÓN NUEVA: {nueva} (la vieja sigue en el historial: {vieja})")
+    return {"ok": True, "sesion": nueva, "anterior": vieja}
+
+
 def limpiar_prefijo(texto: str) -> str:
     m = NOMBRE_RE.match(texto)
     if m:
         return texto[m.end():].strip()
-    m2 = re.search(r"\b(jenny|jena|jeni|jarvis|harvis)\b", texto, re.IGNORECASE)
+    m2 = re.search(r"\b(jenny|jeni|jena|keny|keni|kenny|jarvis|harvis)\b", texto, re.IGNORECASE)
     if m2:
         cola = texto[m2.end():].strip(" ,;:.")
         if len(cola) > 8:
@@ -187,6 +253,9 @@ def hilo_detector():
         despertar_sec = None
         for (sec, chunk) in items:
             try:
+                if len(chunk) < 400:                    # chunk degenerado (<25 ms @16k):
+                    last_procesado["v"] = sec           # oww lo rechaza gritando (22:13)
+                    continue
                 scores = modelo_oww.predict(chunk)
             except Exception as e:
                 log("predict falló:", str(e)[:140])
@@ -299,6 +368,26 @@ def hilo_flujo(sec_despierto: int):
         texto_limpio = limpiar_prefijo(texto)
         if len(texto_limpio.split()) < 2:
             log(f"STT={texto!r} → solo el nombre — duermo sin turno")
+            with lock:
+                estado["v"] = "dormido"
+            return
+        # «Jenny, sesión nueva» POR VOZ (la casa es manos libres): rota y
+        # confirma con la voz de la casa — SIN gastar el LLM (mismo principio
+        # del llamado sin frase). Comando exacto: el match contra la FRASE
+        # COMPLETA evita rotaciones accidentales en medio de una charla.
+        tlow = re.sub(r"[^a-zñ0-9 ]", " ",
+                      texto_limpio.lower().replace("á", "a").replace("é", "e")
+                      .replace("í", "i").replace("ó", "o").replace("ú", "u").replace("ü", "u"))
+        tlow = re.sub(r"\s+", " ", tlow).strip()
+        if SESION_NUEVA_RE.fullmatch(tlow):
+            nueva = _sesion_nueva()
+            frase = "Listo, tavito. Sesión nueva: empezamos de cero."
+            audio = _tts(frase)
+            with lock:
+                estado["v"] = "talking"
+                estado["ultimo"] = {"respuesta": frase, "audio": audio, "ms": 0}
+                estado["ultimo_t"] = time.time()
+            time.sleep(1.0)
             with lock:
                 estado["v"] = "dormido"
             return
@@ -425,7 +514,8 @@ class H(BaseHTTPRequestHandler):
                      "pausado": pausado["v"], "wakeword": Path(MODELO).stem,
                      "grabcando": estado["v"] == "listening",
                      "gracia_t": estado.get("gracia_t", 0.0),
-                     "ultimo": estado["ultimo"], "ultimo_t": estado["ultimo_t"]}
+                     "ultimo": estado["ultimo"], "ultimo_t": estado["ultimo_t"],
+                     "sesion": _sesion()}
             self._json(d)
             return
         if camino in ("/", "/estacion", "/estacion/"):
@@ -459,6 +549,9 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         camino = self.path.split("?", 1)[0]
+        if camino == "/sesion-nueva":          # el 🗒️ de la tablet y la estación
+            self._json(_sesion_nueva())
+            return
         if camino == "/audio":
             try:
                 n = int(self.headers.get("Content-Length") or 0)
