@@ -392,6 +392,8 @@ def hilo_flujo(sec_despierto: int):
                 estado["v"] = "dormido"
             return
         log(f"pregunta limpia → {texto_limpio[:80]!r}")
+        with lock:                                  # LA CASA PIENSA EN VOZ:
+            estado["v"] = "thinking"                # el sprite + el «Déjame pensar» del cliente
         resp = _turno(texto_limpio)
         with lock:
             estado["v"] = "talking"
@@ -411,7 +413,7 @@ def _turno(texto: str, conversacion: bool = True) -> dict:
     _pon_estado("thinking")
     audio = None
     try:
-        resp = jv.preguntar_jennas(texto, SESION, conversacion=conversacion)
+        resp = jv.preguntar_jennas(texto, _sesion(), conversacion=conversacion)
         resp_limpia = _solo_texto(resp)
         _publicar({"rol": "jennas", "texto": resp_limpia, "t": time.strftime("%H:%M:%S")})
         _pon_estado("talking")
@@ -437,24 +439,182 @@ _tts_voice = None
 _TTS_LOCK = threading.Lock()
 
 
-def _tts(texto: str) -> str:
-    """Sintetización Piper con el _voice del cerebro → .wav servido por /voz/ ."""
-    from piper import PiperVoice
-    from piper.config import SynthesisConfig
-    global _tts_voice
+# ── LOS FIJOS DE LA CASA (la fábrica del bicéfalo, port 1:1 — 17-oct) ──
+# Tavo pidió «estoy pensando y frases similares mientras espero respuesta» —
+# la frase de espera + los rellenos al turn largo. Sintetizados UNA vez al
+# ARRANQUE con la voz de la casa (el turno no paga TTS por lo que se sabe de
+# antemano). ATÓMICA: primero TODO en memoria, después a disco — un fallo a
+# mitad no deja un lote mezclado (la lección del 8-9-oct del bicéfalo).
+#
+# EL MOTOR: SUPERTONIC 3 (el OFICIAL desde 10-oct: «supertonic son buenísimas,
+# las piper son basura» — verbatim de Tavo en el env-tablet del bicéfalo).
+# LA VOZ ACTIVA: «clara» (la entrenada local) por JARVIS_VOZ_SUPERTONIC —
+# cambio en caliente con _cambiar_voz_local(). Piper queda como degradación
+# limpia (si faltan modelos de Supertonic, el log lo dice y la voz sigue).
+RELLENO = ["Sigo trabajando.", "Esto se está alargando un poco.",
+           "Ya falta poco.", "Sigo en eso.", "Casi listo."]
+FIJOS_MARKER = VOZ_DIR / ".fijos-voz"
+
+
+def _cargar_supertonic():
+    """El motor OFICIAL de la casa: Supertonic 3 (ONNX local 44 100 Hz, CPU —
+    la VRAM queda para el Whisper del dictado). Degradación limpia: si el
+    módulo o el modelo no están, devuelve None y `_motor_local()` cae a Piper
+    avisando UNA vez (el bicéfalo ya había vivido esto)."""
+    try:
+        spec = importlib.util.spec_from_file_location("tts_supertonic", AQUI / "tts_supertonic.py")
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["tts_supertonic"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception as e:
+        print(f"[jenny] (motor Supertonic no disponible: {str(e)[:80]})", flush=True)
+        return None
+
+
+def _cargar_piper():
+    """La degradación del bicéfalo: la voz que a Tavo le parece basura, pero
+    es la ÚNICA garantía de que la casa no quede muda."""
+    try:
+        spec = importlib.util.spec_from_file_location("tts_piper", AQUI / "tts_piper.py")
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["tts_piper"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception as e:
+        print(f"[jenny] (Piper no disponible: {str(e)[:80]})", flush=True)
+        return None
+
+
+st = _cargar_supertonic()
+pyp = _cargar_piper()
+USAR_SUPERTONIC = os.environ.get("JARVIS_TTS", "supertonic") == "supertonic"
+_ST_AVISADO = {"v": False}
+
+
+def _motor_local():
+    """El motor local ACTIVO con su interfaz común (sintetizar+normalizar+usar_voz):
+    Supertonic si está seleccionado Y disponible; si no, Piper avisando una sola vez."""
+    global _ST_AVISADO
+    if USAR_SUPERTONIC and st is not None and st.disponible():
+        return st
+    if USAR_SUPERTONIC and not _ST_AVISADO["v"]:
+        motivo = "el módulo no cargó" if st is None else f"faltan modelos {st.faltantes()}"
+        print(f"[jenny] ⚠ Supertonic seleccionado pero no disponible ({motivo}) → Piper", flush=True)
+        _ST_AVISADO["v"] = True
+    return pyp
+
+
+def _fijos_completos() -> bool:
+    try:
+        if not any(VOZ_DIR.glob("pensar.*")) and not any(VOZ_DIR.glob("pensar.mp3")):
+            return False
+        return all(any(VOZ_DIR.glob(f"relleno-{i}.*")) for i in range(len(RELLENO)))
+    except Exception:
+        return False
+
+
+def _reempaqueta_wav(data: bytes) -> bytes:
+    """El WAV SANO para el navegador. El `normalizar` de los motores pasa por ffmpeg
+    pipe y el RIFF sale en modo streaming (riffSize=0xFFFFFFFF): el Python `wave` y
+    el Chrome Android leen la duración FANTASMA (~13,5 h) de un archivo real de ~1,6 s.
+    Extraigo el PCM real de los chunks y re-escribo un header chico y honesto."""
+    import struct
+    if data[:4] != b'RIFF':
+        return data
+    pcm = None
+    rate, ch = 44100, 1
+    pos = 12
+    while pos + 8 <= len(data):
+        cid = data[pos:pos+4]
+        try:
+            sz = struct.unpack('<I', data[pos+4:pos+8])[0]
+        except Exception:
+            break
+        body = data[pos+8:pos+8+sz]
+        if cid == b'fmt ' and len(body) >= 16:
+            ch = struct.unpack('<H', body[2:4])[0]
+            rate = struct.unpack('<I', body[4:8])[0]
+        elif cid == b'data':
+            pcm = body
+            break
+        pos += 8 + sz + (sz & 1)
+    if not pcm:
+        return data                      # sin data chunk: dejo el original (raro pero vivo)
+    bio = io.BytesIO()
+    with wave.open(bio, 'wb') as wf:
+        wf.setnchannels(ch if 1 <= ch <= 2 else 1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(pcm)
+    return bio.getvalue()
+
+
+def _tts_bytes(texto: str) -> bytes:
+    """WAV del motor local ACTIVO (Supertonic / Piper de respaldo) con la voz
+    activa, normalizado al MISMO volumen que la respuesta — y saneado para el
+    navegador (RIFF con duración REAL, no el «unknown» del ffmpeg pipe)."""
+    local = _motor_local()
+    if local is None:
+        raise RuntimeError("no hay motor de voz local cargado")
     with _TTS_LOCK:
-        if _tts_voice is None:
-            _tts_voice = PiperVoice.load(jv.PIPER_MODEL)
-            list(_tts_voice.synthesize("listo"))
-        syn = SynthesisConfig(length_scale=jv.LENGTH_SCALE)
-        out = VOZ_DIR / f"tabla-{int(time.time() * 1000)}.wav"
-        with wave.open(str(out), "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(_tts_voice.config.sample_rate)
-            for ch in _tts_voice.synthesize(jv.para_voz(texto), syn_config=syn):
-                wf.writeframes(ch.audio_int16_bytes)
+        return _reempaqueta_wav(local.normalizar(local.sintetizar(texto)))
+
+
+def _tts(texto: str) -> str:
+    """Sintetiza y SIRVE: el .wav nombrado por turno en runtime/ → /voz/<f>."""
+    out = VOZ_DIR / f"tabla-{int(time.time() * 1000)}.wav"
+    out.write_bytes(_tts_bytes(texto))
     return "/voz/" + out.name
+
+
+def _clave_voz_activa() -> str:
+    """La clave REAL de la voz activa del motor corriente (para el marker de los fijos)."""
+    local = _motor_local()
+    try:
+        if local is st and st is not None:
+            return f"supertonic:{st.VOZ_ACTIVA}"
+        if local is pyp and pyp is not None:
+            return f"piper:{getattr(pyp, 'VOZ_ACTIVA', 'modelo')}"
+    except Exception:
+        pass
+    return "desconocida"
+
+
+def _fijos_al_dia() -> bool:
+    """¿Los fijos son de la voz ACTIVA y son todos? (el marker de la fábrica —
+    si cambian el motor o la voz con /voz, el arranque los regenera solo)."""
+    try:
+        return FIJOS_MARKER.read_text().strip() == _clave_voz_activa() and _fijos_completos()
+    except Exception:
+        return False
+
+
+def _preparar_fijos():
+    """La voz de la casa para la espera: «Déjame pensar.» + los rellenos.
+    Al arranque SI los fijos no son de la voz activa (marker), determinista,
+    una vez."""
+    if _fijos_al_dia():
+        log(f"fijos al día ({_clave_voz_activa()}) — no regenero")
+        return
+    try:
+        lote = {}
+        for nombre, frase in ([("pensar.wav", "Déjame pensar.")]
+                              + [(f"relleno-{i}.wav", f) for i, f in enumerate(RELLENO)]):
+            lote[nombre] = _tts_bytes(frase)
+        for nombre, data in lote.items():
+            destino = VOZ_DIR / nombre
+            tmp = destino.with_suffix(".wav.tmp")
+            tmp.write_bytes(data)
+            os.replace(tmp, destino)
+        FIJOS_MARKER.write_text(_clave_voz_activa())
+        log(f"fijos listos: {len(lote)} audios con {_clave_voz_activa()}")
+    except Exception as e:
+        log(f"⚠ no pude preparar los fijos: {str(e)[:120]}")
 
 
 def _solo_texto(resp):
@@ -552,6 +712,18 @@ class H(BaseHTTPRequestHandler):
         if camino == "/sesion-nueva":          # el 🗒️ de la tablet y la estación
             self._json(_sesion_nueva())
             return
+        if camino == "/preguntar":             # el turno EXTERNO (la tablet, la API de la casa)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                d = json.loads(self.rfile.read(n).decode()) if n else {}
+            except Exception:
+                d = {}
+            texto = str(d.get("texto") or "").strip()
+            if not texto:
+                self._json({"error": "sin texto"}, 400)
+                return
+            self._json(_turno(texto, conversacion=bool(d.get("conversacion", True))))
+            return
         if camino == "/audio":
             try:
                 n = int(self.headers.get("Content-Length") or 0)
@@ -583,6 +755,7 @@ class H(BaseHTTPRequestHandler):
 
 def main():
     threading.Thread(target=hilo_detector, daemon=True).start()
+    threading.Thread(target=_preparar_fijos, daemon=True).start()   # los fijos al arranque, sin atar el boot
     srv = ThreadingHTTPServer(("0.0.0.0", PUERTO), H)
     srv.daemon_threads = True
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

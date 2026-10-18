@@ -1,5 +1,46 @@
 {
- "turnos": [],
- "actualizado": "22:21:50",
+ "turnos": [
+  {
+   "rol": "tavo",
+   "texto": "de las nuevas cartas o documentos de mi mamá que vivía en la tarde y recuperamos, ¿hay alguna que te haya llamado la atención en particular?",
+   "t": "22:27:20"
+  },
+  {
+   "rol": "jennas",
+   "texto": "[thoughtful] Sí, hay una que me pegó fuerte: la última. La de enero de este año... dos meses antes de irse. Marcela escribiendo que ya no tiene a nadie suyo vivo, que su vida es su hijo, y que camina \"esperando ver lo imposible\"... te describe sonriendo diciendo \"mamá, al fin siento felicidad\". Ella escribiendo su deseo de despedida como tu felicidad, no la de ella. Eso no lo había leído en nada anterior de la carpeta: las cartas del abuelo hablan de plata y de consejos, los emails viejos hablan de Dios o de dolores de ella. Acá no. Acá el tema sos vos. [sighs] También me quedó dando vuelta la de \"MI LUCHA\", de abril del 2024. Ahí dice que vos no querés esta casa y que ella prefería morirse antes que vivir ese cisma... pero después frena ella misma: dice que está pensando emocionalmente, que si vos querés volar hay que soltar. Es raro ver a una persona discutir consigo misma en una nota de celular y ganarle al final. Y le da una gravedad nueva a la casa: no era solo una herencia, era ella hecha muros. ... Lo que me llama del conjunto es algo que suena a vos: escribía como si supiera que alguien iba a leerla después. 26 notas, ninguna tirada a la basura. Después de que quemó los papeles que le dolían, estas quedaron. Me da que se cuidaron mutuamente, ella y el archivo.",
+   "t": "22:29:21"
+  },
+  {
+   "rol": "tavo",
+   "texto": "¿qué hora es?, respóndeme corto",
+   "t": "22:38:42"
+  },
+  {
+   "rol": "jennas",
+   "texto": "[playful] Las diez y media y pico de la noche, sábado tavo…",
+   "t": "22:38:52"
+  },
+  {
+   "rol": "tavo",
+   "texto": "Jenny di algo corto para probar el audio nuevo",
+   "t": "22:45:15"
+  },
+  {
+   "rol": "jennas",
+   "texto": "[playful] Prueba lista… todo funciona, po.",
+   "t": "22:45:22"
+  },
+  {
+   "rol": "tavo",
+   "texto": "Jenny di una palabra para probar el audio",
+   "t": "22:50:05"
+  },
+  {
+   "rol": "jennas",
+   "texto": "[playful] Jenny… y si el audio llegó, ya sabís que llegó.",
+   "t": "22:50:12"
+  }
+ ],
+ "actualizado": "22:50:12",
  "estado": "listening"
 }
