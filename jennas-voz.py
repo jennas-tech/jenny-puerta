@@ -432,7 +432,15 @@ PROMPT_TAGS = (
     "En respuestas de una sola frase, igual pon UNO si el tono lo pide. No son adorno: "
     "son el tono. Para una pausa, tres puntos: …\n\n")
 
-PROMPT_CONVERSACION = (PROMPT_TAGS +
+# 17-oct-2026 23:15 (corrección de Tavo: «el prompt todavia tiene emociones de
+# texto»): PROMPT_CONVERSACION llevaba PROMPT_TAGS pegado SIEMPRE — y los tags
+# eran la sintaxis de ELEVENLABS (archivado 9-oct-2026: «muy caro»). Supertonic
+# y Piper los LEEN EN VOZ ALTA; el limpiador del server (_solo_texto) ya no los
+# recibe como instrucción de tono sino como texto que arruina la voz. LA
+# DECISIÓN: la emoción pasa por el TONO del texto (humor, calidez, chile), no
+# por indicaciones corchetadas que ningún motor vivo interpreta. PROMPT_TAGS
+# queda DEPRECADO más abajo (revive con JARVIS_TTS=eleven y `tags=True` al llamar).
+PROMPT_CONVERSACION = (
                        "[Modo conversación: Tavo quiere pensar CON vos — discusión filosófica, "
                        "narrativa o de ideas. Desarrolla tu posición con fundamento: por qué "
                        "sostienes lo que sostienes, con qué se conecta. "
@@ -480,9 +488,9 @@ def _nombre_sesion():
 
 def preguntar_jennas(texto, sesion, timeout=300, conversacion=False, tags=False):
     prompt = PROMPT_CONVERSACION if conversacion else PROMPT_VOZ
-    # Los tags solo los entiende el motor de ElevenLabs. Jarvis ahora lo usa en TODO, pero
-    # la TV sigue con Piper y Piper los LEERÍA en voz alta ("corchete sighs corchete") →
-    # por eso van como parámetro y no como parte del PROMPT_VOZ compartido.
+    # 17-oct-2026: los tags eran de ElevenLabs (archivado). NADIE llama con
+    # tags=True (grep del proyecto = 0 usos); el camino queda por si el motor
+    # expresivo se reactiva (JARVIS_TTS=eleven). El PROMPT_VOZ nunca los tuvo.
     if tags and not conversacion:
         prompt = PROMPT_TAGS + prompt
     razon = REASONING_CONV if conversacion else REASONING_VOZ

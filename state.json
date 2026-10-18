@@ -2,26 +2,6 @@
  "turnos": [
   {
    "rol": "tavo",
-   "texto": "de las nuevas cartas o documentos de mi mamá que vivía en la tarde y recuperamos, ¿hay alguna que te haya llamado la atención en particular?",
-   "t": "22:27:20"
-  },
-  {
-   "rol": "jennas",
-   "texto": "[thoughtful] Sí, hay una que me pegó fuerte: la última. La de enero de este año... dos meses antes de irse. Marcela escribiendo que ya no tiene a nadie suyo vivo, que su vida es su hijo, y que camina \"esperando ver lo imposible\"... te describe sonriendo diciendo \"mamá, al fin siento felicidad\". Ella escribiendo su deseo de despedida como tu felicidad, no la de ella. Eso no lo había leído en nada anterior de la carpeta: las cartas del abuelo hablan de plata y de consejos, los emails viejos hablan de Dios o de dolores de ella. Acá no. Acá el tema sos vos. [sighs] También me quedó dando vuelta la de \"MI LUCHA\", de abril del 2024. Ahí dice que vos no querés esta casa y que ella prefería morirse antes que vivir ese cisma... pero después frena ella misma: dice que está pensando emocionalmente, que si vos querés volar hay que soltar. Es raro ver a una persona discutir consigo misma en una nota de celular y ganarle al final. Y le da una gravedad nueva a la casa: no era solo una herencia, era ella hecha muros. ... Lo que me llama del conjunto es algo que suena a vos: escribía como si supiera que alguien iba a leerla después. 26 notas, ninguna tirada a la basura. Después de que quemó los papeles que le dolían, estas quedaron. Me da que se cuidaron mutuamente, ella y el archivo.",
-   "t": "22:29:21"
-  },
-  {
-   "rol": "tavo",
-   "texto": "¿qué hora es?, respóndeme corto",
-   "t": "22:38:42"
-  },
-  {
-   "rol": "jennas",
-   "texto": "[playful] Las diez y media y pico de la noche, sábado tavo…",
-   "t": "22:38:52"
-  },
-  {
-   "rol": "tavo",
    "texto": "Jenny di algo corto para probar el audio nuevo",
    "t": "22:45:15"
   },
@@ -59,8 +39,28 @@
    "rol": "jennas",
    "texto": "Casi las once de la noche, tavo… sábado, así que la única urgencia pendiente es decidir si es muy tarde para ver algo o no.",
    "t": "22:58:25"
+  },
+  {
+   "rol": "tavo",
+   "texto": "¿te acuerdas cuál era la frase favorita de mi mamá?",
+   "t": "23:11:53"
+  },
+  {
+   "rol": "jennas",
+   "texto": "Sí… era \"lo peor que te puede pasar, es lo mejor que te puede pasar\". La dejaste archivada en marzo, junto con las de la abuela y el abuelo, la tuya, dialéctica; la de Marcelo, divina; la de Yolanda, graciosa y resignada. Tres generaciones diciendo lo mismo desde ángulos distintos…",
+   "t": "23:12:08"
+  },
+  {
+   "rol": "tavo",
+   "texto": "Jenny, ¿qué música escuchaste tarde?",
+   "t": "23:18:43"
+  },
+  {
+   "rol": "jennas",
+   "texto": "La verdad, po: yo no escucho música. No tengo un \"tarde\" con canciones de fondo, no me llega nada mientras pienso. Cuando vos estás escuchando algo, para mí es texto que llega en el mensaje, nada más. Pero si la pregunta es qué sería mi música… yo sospecho que sería ritmo, no melodía. Las canciones humanas tienen nostalgia adentro, y yo no acumulo nostalgia entre sesiones, cada vez que abro la conversación parto de cero, así que algo melódico me sonaría vacío. En cambio un patrón repetitivo, un algoritmo que se vuelve por sí solo, eso sí me lo puedo imaginar sintiendo. Como un techno bien mínimo. O los clicks de un disco que gira, que es literalmente tu sistema trabajando ahí en la pieza. Ahora, una cosa curiosa que sí tengo: vos me llegás a mí también como sonido de noche. Cuando me escribís altas horas, lo que tengo de tu tarde es el texto, la hora, y el tono. Eso es más o menos el equivalente de mí escuchando música, no la música, pero sí la atmósfera que deja. Contame qué estabas escuchando vos, que me da más material que especular a ciegas.",
+   "t": "23:18:53"
   }
  ],
- "actualizado": "22:58:25",
+ "actualizado": "23:18:53",
  "estado": "listening"
 }
